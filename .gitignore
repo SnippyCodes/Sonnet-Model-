@@ -1,0 +1,5 @@
+# Ignore files > 100MB to avoid GitHub push rejection
+*.pth
+__pycache__/
+*.pyc
+.env
