@@ -39,6 +39,13 @@ try:
 except ImportError:
     HAS_ENHANCER = False
 
+try:
+    from sahi_sonar import SAHISonarEngine
+    HAS_SAHI = True
+except ImportError:
+    HAS_SAHI = False
+
+
 BASE_DIR = Path(__file__).resolve().parent
 WEIGHTS_A = BASE_DIR / "weights" / "model_a" / "best.pth"
 WEIGHTS_B = BASE_DIR / "weights" / "model_b" / "best.pt"
@@ -82,17 +89,17 @@ def load_model_hazard():
     return _model_hazard
 
 @gpu_decorator
-def run_sonar_detection(input_image, model_choice, conf_threshold, enhance_acoustic=False):
+def run_sonar_detection(input_image, model_choice, conf_threshold, enhance_acoustic=False, enable_sahi=False, enable_tta=False):
     if input_image is None:
         return None, "Please upload or select a sonar scan.", "{}"
 
     img_rgb = input_image
     img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
 
-    # 1. Acoustic Image Enhancement (CLAHE + Despeckle + TVG) if requested
+    # 1. Acoustic Image Enhancement (CLAHE + Lee Despeckle + TVG) if requested
     if enhance_acoustic and HAS_ENHANCER:
         enhancer = SonarImageEnhancer()
-        img_bgr, _ = enhancer.enhance(img_bgr)
+        img_bgr, _ = enhancer.enhance(img_bgr, apply_despeckle=True, apply_clahe=True, apply_tvg=True, use_lee_filter=True)
 
     h_orig, w_orig = img_bgr.shape[:2]
     vis_img = img_bgr.copy()
@@ -110,11 +117,48 @@ def run_sonar_detection(input_image, model_choice, conf_threshold, enhance_acous
 
     t0 = time.perf_counter()
 
-    if "Model C" in model_choice or "Ghost Net" in model_choice:
+    if enable_sahi and HAS_SAHI and ("Model C" in model_choice or "Model B" in model_choice):
+        model = load_model_hazard() if ("Model C" in model_choice or "Ghost Net" in model_choice) else load_model_b()
+        if model is None:
+            return None, "Selected model weights not found.", "{}"
+        engine = SAHISonarEngine(model, slice_size=640, overlap_ratio=0.20)
+        raw_dets, _ = engine.predict_waterfall(img_bgr, conf_threshold=conf_threshold, iou_threshold=0.45, use_tta=enable_tta)
+
+        img_area = w_orig * h_orig
+        det_idx = 0
+        for d in raw_dets:
+            cname = d["class"]
+            conf_str = d["confidence"]
+            x1, y1, x2, y2 = d["bbox"]
+            bw, bh = x2 - x1, y2 - y1
+            box_area = bw * bh
+            if (box_area / img_area) > 0.92 or (bw > 0.96 * w_orig and bh > 0.96 * h_orig):
+                continue
+            color = color_map.get(cname, (0, 255, 255))
+            cv2.rectangle(vis_img, (x1, y1), (x2, y2), color, 2)
+            label_str = f"{cname.upper()}: {conf_str}"
+            (tw, th), baseline = cv2.getTextSize(label_str, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+            text_y = max(th + 6, y1 - 6)
+            cv2.rectangle(vis_img, (x1, text_y - th - 4), (x1 + tw + 6, text_y + baseline), (20, 20, 20), -1)
+            cv2.rectangle(vis_img, (x1, text_y - th - 4), (x1 + tw + 6, text_y + baseline), color, 1)
+            cv2.putText(vis_img, label_str, (x1 + 3, text_y - 2),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2, cv2.LINE_AA)
+
+            length_m = round(bh * 0.05, 2)
+            width_m = round(bw * 0.05, 2)
+            det_idx += 1
+            detections.append({
+                "id": f"HAZARD-{det_idx:03d}",
+                "class": cname,
+                "confidence": conf_str,
+                "dimensions_m": f"{length_m}m x {width_m}m",
+                "bbox": [x1, y1, x2, y2]
+            })
+    elif "Model C" in model_choice or "Ghost Net" in model_choice:
         model = load_model_hazard()
         if model is None:
             return None, "Multi-hazard weights not found. Please train with train_multiclass_hazard_yolo.py.", "{}"
-        results = model.predict(source=img_bgr, conf=conf_threshold, iou=0.45, imgsz=640, verbose=False)
+        results = model.predict(source=img_bgr, conf=conf_threshold, iou=0.45, imgsz=640, augment=enable_tta, verbose=False)
         res = results[0]
         boxes = res.boxes.xyxy.cpu().numpy() if len(res.boxes) > 0 else []
         scores = res.boxes.conf.cpu().numpy() if len(res.boxes) > 0 else []
@@ -157,7 +201,7 @@ def run_sonar_detection(input_image, model_choice, conf_threshold, enhance_acous
         model = load_model_b()
         if model is None:
             return None, "Model B weights not found. Please ensure weights/model_b/best.pt exists.", "{}"
-        results = model.predict(source=img_bgr, conf=conf_threshold, iou=0.45, imgsz=640, verbose=False)
+        results = model.predict(source=img_bgr, conf=conf_threshold, iou=0.45, imgsz=640, augment=enable_tta, verbose=False)
         res = results[0]
         boxes = res.boxes.xyxy.cpu().numpy() if len(res.boxes) > 0 else []
         scores = res.boxes.conf.cpu().numpy() if len(res.boxes) > 0 else []
@@ -239,8 +283,14 @@ def run_sonar_detection(input_image, model_choice, conf_threshold, enhance_acous
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
     fps = 1000.0 / elapsed_ms if elapsed_ms > 0 else 0
 
+    mode_tags = []
+    if enable_sahi: mode_tags.append("SAHI Sliced")
+    if enable_tta: mode_tags.append("TTA")
+    if enhance_acoustic: mode_tags.append("Enhanced")
+    tag_str = f" [{', '.join(mode_tags)}]" if mode_tags else ""
+
     vis_rgb = cv2.cvtColor(vis_img, cv2.COLOR_BGR2RGB)
-    summary_text = f"**Status:** {len(detections)} acoustic hazards detected | **Latency:** {elapsed_ms:.1f} ms ({fps:.1f} FPS) | **Resolution:** {w_orig}x{h_orig} px"
+    summary_text = f"**Status:** {len(detections)} acoustic hazards detected{tag_str} | **Latency:** {elapsed_ms:.1f} ms ({fps:.1f} FPS) | **Resolution:** {w_orig}x{h_orig} px"
     telemetry_json = json.dumps({"timestamp": datetime.datetime.now().isoformat(), "model": model_choice, "detections": detections}, indent=2)
 
     return vis_rgb, summary_text, telemetry_json
@@ -261,7 +311,10 @@ with gr.Blocks(title="SIH 2026: SSS Hazard Detector") as demo:
                 label="Select Active Detector"
             )
             conf_slider = gr.Slider(minimum=0.10, maximum=0.90, value=0.25, step=0.05, label="Confidence Threshold")
-            enhance_check = gr.Checkbox(label="✨ Acoustic Image Enhancement Mode (CLAHE + Despeckle)", value=True)
+            enhance_check = gr.Checkbox(label="✨ Acoustic Enhancement (TVG + Lee Filter + CLAHE)", value=True)
+            with gr.Row():
+                sahi_check = gr.Checkbox(label="🧩 SAHI Sliced Waterfall Mode", value=False)
+                tta_check = gr.Checkbox(label="🔄 Test-Time Augmentation (TTA)", value=False)
             img_input = gr.Image(type="numpy", label="Upload Sonar Waterfall Scan")
             btn_run = gr.Button("🔍 Run Sonar Inspection", variant="primary")
 
@@ -271,17 +324,17 @@ with gr.Blocks(title="SIH 2026: SSS Hazard Detector") as demo:
             telemetry_output = gr.Code(label="Mission Telemetry (JSON Export)", language="json")
 
     sample_candidates = [
-        [str(BASE_DIR / "samples" / "sample_crab_pot.jpg"), "Model C: YOLO11s Multi-Hazard & Ghost Net Detector (5-Class ALDFG)", 0.25, True],
-        [str(BASE_DIR / "samples" / "sample_ghost_net.jpg"), "Model C: YOLO11s Multi-Hazard & Ghost Net Detector (5-Class ALDFG)", 0.25, True],
-        [str(BASE_DIR / "samples" / "sample_pipeline_cylinder.jpg"), "Model C: YOLO11s Multi-Hazard & Ghost Net Detector (5-Class ALDFG)", 0.25, True],
-        [str(BASE_DIR / "samples" / "sample_wreckage.jpg"), "Model C: YOLO11s Multi-Hazard & Ghost Net Detector (5-Class ALDFG)", 0.25, True],
-        [str(BASE_DIR / "samples" / "sample_clean_seabed.jpg"), "Model C: YOLO11s Multi-Hazard & Ghost Net Detector (5-Class ALDFG)", 0.25, True],
+        [str(BASE_DIR / "samples" / "sample_crab_pot.jpg"), "Model C: YOLO11s Multi-Hazard & Ghost Net Detector (5-Class ALDFG)", 0.25, True, False, False],
+        [str(BASE_DIR / "samples" / "sample_ghost_net.jpg"), "Model C: YOLO11s Multi-Hazard & Ghost Net Detector (5-Class ALDFG)", 0.25, True, False, False],
+        [str(BASE_DIR / "samples" / "sample_pipeline_cylinder.jpg"), "Model C: YOLO11s Multi-Hazard & Ghost Net Detector (5-Class ALDFG)", 0.25, True, False, False],
+        [str(BASE_DIR / "samples" / "sample_wreckage.jpg"), "Model C: YOLO11s Multi-Hazard & Ghost Net Detector (5-Class ALDFG)", 0.25, True, False, False],
+        [str(BASE_DIR / "samples" / "sample_clean_seabed.jpg"), "Model C: YOLO11s Multi-Hazard & Ghost Net Detector (5-Class ALDFG)", 0.25, True, False, False],
     ]
     existing_samples = [c for c in sample_candidates if os.path.exists(c[0])]
     if existing_samples:
         gr.Examples(
             examples=existing_samples,
-            inputs=[img_input, model_radio, conf_slider, enhance_check],
+            inputs=[img_input, model_radio, conf_slider, enhance_check, sahi_check, tta_check],
             outputs=[img_output, status_output, telemetry_output],
             fn=run_sonar_detection,
             cache_examples=False,
@@ -290,7 +343,7 @@ with gr.Blocks(title="SIH 2026: SSS Hazard Detector") as demo:
 
     btn_run.click(
         fn=run_sonar_detection,
-        inputs=[img_input, model_radio, conf_slider, enhance_check],
+        inputs=[img_input, model_radio, conf_slider, enhance_check, sahi_check, tta_check],
         outputs=[img_output, status_output, telemetry_output]
     )
 

@@ -24,7 +24,24 @@ class SonarImageEnhancer:
         self.sigma_color = despeckle_sigma_color
         self.sigma_space = despeckle_sigma_space
 
-    def enhance(self, img_input, apply_despeckle=True, apply_clahe=True, apply_tvg=True):
+    @staticmethod
+    def lee_filter(img, win_size=7):
+        """
+        Vectorized Adaptive Lee Filter for multiplicative acoustic speckle noise.
+        Smooths homogeneous seabed reverberation while preserving sharp shadow/highlight boundaries.
+        """
+        img_f = img.astype(np.float32)
+        k = win_size
+        mean = cv2.boxFilter(img_f, -1, (k, k))
+        sqr_mean = cv2.boxFilter(img_f ** 2, -1, (k, k))
+        var = np.maximum(sqr_mean - mean ** 2, 0.0)
+        overall_var = np.mean(var) + 1e-5
+        w = var / (var + overall_var)
+        w = np.clip(w, 0.0, 1.0)
+        filtered = mean + w * (img_f - mean)
+        return np.clip(filtered, 0, 255).astype(np.uint8)
+
+    def enhance(self, img_input, apply_despeckle=True, apply_clahe=True, apply_tvg=True, use_lee_filter=True):
         """
         Enhances raw sonar waterfall imagery:
         - img_input: numpy array (BGR or Grayscale)
@@ -42,7 +59,6 @@ class SonarImageEnhancer:
 
         # 1. TVG / Lateral Range Attenuation Compensation
         if apply_tvg:
-            # Compensate for cross-track acoustic acoustic attenuation
             col_mean = np.mean(enhanced, axis=0) + 1e-4
             target_mean = np.median(col_mean)
             tvg_gain = np.clip(target_mean / col_mean, 0.7, 1.4)
@@ -51,9 +67,12 @@ class SonarImageEnhancer:
         else:
             enhanced = enhanced.astype(np.uint8)
 
-        # 2. Edge-Preserving Despeckle Filtering (Bilateral filter smooths speckle without blurring shadow edges)
+        # 2. Adaptive Speckle Denoising (Lee filter or Bilateral filter)
         if apply_despeckle:
-            enhanced = cv2.bilateralFilter(enhanced, d=self.despeckle_d, sigmaColor=self.sigma_color, sigmaSpace=self.sigma_space)
+            if use_lee_filter:
+                enhanced = self.lee_filter(enhanced, win_size=self.despeckle_d)
+            else:
+                enhanced = cv2.bilateralFilter(enhanced, d=self.despeckle_d, sigmaColor=self.sigma_color, sigmaSpace=self.sigma_space)
 
         # 3. Acoustic CLAHE (Local adaptive contrast to pop acoustic highlights and acoustic shadows)
         if apply_clahe:
