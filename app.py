@@ -99,13 +99,13 @@ def run_sonar_detection(input_image, model_choice, conf_threshold, enhance_acous
     detections = []
 
     color_map = {
-        "shipwreck": (0, 183, 255),
-        "shipwreck_wreckage": (0, 183, 255),
-        "pipeline": (237, 160, 57),
-        "pipe_cylinder": (237, 160, 57),
-        "ghost_net": (255, 220, 0),        # Cyan / bright ALDFG net highlight
-        "mine_cylinder": (50, 50, 240),     # Crimson warning
-        "crab_pot": (220, 90, 150)          # Violet trap hazard
+        "shipwreck": (0, 140, 255),          # Amber / Orange
+        "shipwreck_wreckage": (0, 140, 255),
+        "pipeline": (255, 180, 0),          # Cyan / Blue
+        "pipe_cylinder": (255, 180, 0),
+        "ghost_net": (0, 230, 255),          # Vibrant Gold / Yellow ALDFG highlight
+        "mine_cylinder": (40, 40, 240),      # Crimson hazard warning
+        "crab_pot": (50, 230, 50)            # Vibrant Emerald Lime trap hazard
     }
 
     t0 = time.perf_counter()
@@ -129,14 +129,20 @@ def run_sonar_detection(input_image, model_choice, conf_threshold, enhance_acous
             bw, bh = x2 - x1, y2 - y1
             box_area = bw * bh
 
-            # Agent.md Line 65 Size Sanity Filter: reject degenerate full-frame false alarms
-            if (box_area / img_area) > 0.70 or (bw > 0.90 * w_orig and bh > 0.90 * h_orig):
+            # Agent.md Line 65 Size Sanity Filter: reject degenerate frame-border artifacts
+            if (box_area / img_area) > 0.92 or (bw > 0.96 * w_orig and bh > 0.96 * h_orig):
                 continue
 
             color = color_map.get(cname, (0, 255, 255))
             cv2.rectangle(vis_img, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(vis_img, f"{cname}: {s*100:.1f}%", (x1, max(20, y1 - 8)),
+            label_str = f"{cname.upper()}: {s*100:.1f}%"
+            (tw, th), baseline = cv2.getTextSize(label_str, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+            text_y = max(th + 6, y1 - 6)
+            cv2.rectangle(vis_img, (x1, text_y - th - 4), (x1 + tw + 6, text_y + baseline), (20, 20, 20), -1)
+            cv2.rectangle(vis_img, (x1, text_y - th - 4), (x1 + tw + 6, text_y + baseline), color, 1)
+            cv2.putText(vis_img, label_str, (x1 + 3, text_y - 2),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2, cv2.LINE_AA)
+
             length_m = round(bh * 0.05, 2)
             width_m = round(bw * 0.05, 2)
             det_idx += 1
@@ -166,14 +172,20 @@ def run_sonar_detection(input_image, model_choice, conf_threshold, enhance_acous
             bw, bh = x2 - x1, y2 - y1
             box_area = bw * bh
 
-            # Agent.md Line 65 Size Sanity Filter: reject degenerate full-frame false alarms
-            if (box_area / img_area) > 0.70 or (bw > 0.90 * w_orig and bh > 0.90 * h_orig):
+            # Agent.md Line 65 Size Sanity Filter: reject degenerate frame-border artifacts
+            if (box_area / img_area) > 0.92 or (bw > 0.96 * w_orig and bh > 0.96 * h_orig):
                 continue
 
             color = color_map.get(cname, (0, 255, 255))
             cv2.rectangle(vis_img, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(vis_img, f"{cname}: {s*100:.1f}%", (x1, max(20, y1 - 8)),
+            label_str = f"{cname.upper()}: {s*100:.1f}%"
+            (tw, th), baseline = cv2.getTextSize(label_str, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+            text_y = max(th + 6, y1 - 6)
+            cv2.rectangle(vis_img, (x1, text_y - th - 4), (x1 + tw + 6, text_y + baseline), (20, 20, 20), -1)
+            cv2.rectangle(vis_img, (x1, text_y - th - 4), (x1 + tw + 6, text_y + baseline), color, 1)
+            cv2.putText(vis_img, label_str, (x1 + 3, text_y - 2),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2, cv2.LINE_AA)
+
             length_m = round(bh * 0.05, 2)
             width_m = round(bw * 0.05, 2)
             det_idx += 1
@@ -206,8 +218,14 @@ def run_sonar_detection(input_image, model_choice, conf_threshold, enhance_acous
             x1, y1, x2, y2 = [int(v) for v in b]
             color = color_map.get(cname, (0, 255, 255))
             cv2.rectangle(vis_img, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(vis_img, f"{cname}: {s*100:.1f}%", (x1, max(20, y1 - 8)),
+            label_str = f"{cname.upper()}: {s*100:.1f}%"
+            (tw, th), baseline = cv2.getTextSize(label_str, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+            text_y = max(th + 6, y1 - 6)
+            cv2.rectangle(vis_img, (x1, text_y - th - 4), (x1 + tw + 6, text_y + baseline), (20, 20, 20), -1)
+            cv2.rectangle(vis_img, (x1, text_y - th - 4), (x1 + tw + 6, text_y + baseline), color, 1)
+            cv2.putText(vis_img, label_str, (x1 + 3, text_y - 2),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2, cv2.LINE_AA)
+
             length_m = round((y2 - y1) * 0.05, 2)
             width_m = round((x2 - x1) * 0.05, 2)
             detections.append({
@@ -235,14 +253,14 @@ with gr.Blocks(title="SIH 2026: SSS Hazard Detector") as demo:
         with gr.Column(scale=1):
             model_radio = gr.Radio(
                 choices=[
-                    "Model A: Faster R-CNN (MobileNetV3 Edge - 72.9% Recall)",
+                    "Model C: YOLO11s Multi-Hazard & Ghost Net Detector (5-Class ALDFG)",
                     "Model B: YOLO11s Pure Sonar (87.9% Shipwreck mAP50)",
-                    "Model C: YOLO11s Multi-Hazard & Ghost Net Detector (5-Class ALDFG)"
+                    "Model A: Faster R-CNN (MobileNetV3 Edge - 72.9% Recall)"
                 ],
-                value="Model B: YOLO11s Pure Sonar (87.9% Shipwreck mAP50)",
+                value="Model C: YOLO11s Multi-Hazard & Ghost Net Detector (5-Class ALDFG)",
                 label="Select Active Detector"
             )
-            conf_slider = gr.Slider(minimum=0.10, maximum=0.90, value=0.35, step=0.05, label="Confidence Threshold")
+            conf_slider = gr.Slider(minimum=0.10, maximum=0.90, value=0.25, step=0.05, label="Confidence Threshold")
             enhance_check = gr.Checkbox(label="✨ Acoustic Image Enhancement Mode (CLAHE + Despeckle)", value=True)
             img_input = gr.Image(type="numpy", label="Upload Sonar Waterfall Scan")
             btn_run = gr.Button("🔍 Run Sonar Inspection", variant="primary")
@@ -251,6 +269,24 @@ with gr.Blocks(title="SIH 2026: SSS Hazard Detector") as demo:
             img_output = gr.Image(label="Annotated Acoustic Scan")
             status_output = gr.Markdown()
             telemetry_output = gr.Code(label="Mission Telemetry (JSON Export)", language="json")
+
+    sample_candidates = [
+        [str(BASE_DIR / "samples" / "sample_crab_pot.jpg"), "Model C: YOLO11s Multi-Hazard & Ghost Net Detector (5-Class ALDFG)", 0.25, True],
+        [str(BASE_DIR / "samples" / "sample_ghost_net.jpg"), "Model C: YOLO11s Multi-Hazard & Ghost Net Detector (5-Class ALDFG)", 0.25, True],
+        [str(BASE_DIR / "samples" / "sample_pipeline_cylinder.jpg"), "Model C: YOLO11s Multi-Hazard & Ghost Net Detector (5-Class ALDFG)", 0.25, True],
+        [str(BASE_DIR / "samples" / "sample_wreckage.jpg"), "Model C: YOLO11s Multi-Hazard & Ghost Net Detector (5-Class ALDFG)", 0.25, True],
+        [str(BASE_DIR / "samples" / "sample_clean_seabed.jpg"), "Model C: YOLO11s Multi-Hazard & Ghost Net Detector (5-Class ALDFG)", 0.25, True],
+    ]
+    existing_samples = [c for c in sample_candidates if os.path.exists(c[0])]
+    if existing_samples:
+        gr.Examples(
+            examples=existing_samples,
+            inputs=[img_input, model_radio, conf_slider, enhance_check],
+            outputs=[img_output, status_output, telemetry_output],
+            fn=run_sonar_detection,
+            cache_examples=False,
+            label="Demonstration Sonar Waterfall Scans (Click to Test)"
+        )
 
     btn_run.click(
         fn=run_sonar_detection,
