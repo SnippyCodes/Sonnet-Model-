@@ -144,10 +144,14 @@ class SAHISonarEngine:
         slice_images = []
         for (x1, y1, x2, y2) in slice_coords:
             crop = img_bgr[y1:y2, x1:x2]
-            # Ensure exact slice size
-            if crop.shape[0] != self.slice_size or crop.shape[1] != self.slice_size:
-                crop = cv2.resize(crop, (self.slice_size, self.slice_size))
-            slice_images.append(crop)
+            ch, cw = crop.shape[:2]
+            if ch != self.slice_size or cw != self.slice_size:
+                # Pad boundary crops to 640x640 with zero-padding to prevent aspect-ratio stretching
+                padded = np.zeros((self.slice_size, self.slice_size, 3), dtype=np.uint8)
+                padded[:ch, :cw] = crop
+                slice_images.append(padded)
+            else:
+                slice_images.append(crop)
 
         # Batched prediction on all slices
         batch_results = self.model.predict(
@@ -160,7 +164,7 @@ class SAHISonarEngine:
         )
 
         raw_detections = []
-        for idx, (res, (ox, oy, _, _)) in enumerate(zip(batch_results, slice_coords)):
+        for idx, (res, (ox, oy, ex, ey)) in enumerate(zip(batch_results, slice_coords)):
             boxes = res.boxes.xyxy.cpu().numpy() if len(res.boxes) > 0 else []
             scores = res.boxes.conf.cpu().numpy() if len(res.boxes) > 0 else []
             labels = res.boxes.cls.cpu().numpy() if len(res.boxes) > 0 else []
@@ -168,16 +172,18 @@ class SAHISonarEngine:
             for b, s, l in zip(boxes, scores, labels):
                 cid = int(l)
                 cname = self.model.names.get(cid, f"class_{cid}")
-                # Translate back to global waterfall coordinates
-                gx1 = int(b[0] + ox)
-                gy1 = int(b[1] + oy)
-                gx2 = int(b[2] + ox)
-                gy2 = int(b[3] + oy)
+                # Translate back to global waterfall coordinates and clamp to image boundary
+                gx1 = max(0, min(w, int(b[0] + ox)))
+                gy1 = max(0, min(h, int(b[1] + oy)))
+                gx2 = max(0, min(w, int(b[2] + ox)))
+                gy2 = max(0, min(h, int(b[3] + oy)))
 
                 raw_detections.append({
                     "class": cname,
                     "confidence": f"{s*100:.1f}%",
                     "conf_val": float(s),
+                    "bbox": [gx1, gy1, gx2, gy2]
+                })
                     "bbox": [gx1, gy1, gx2, gy2]
                 })
 
