@@ -114,24 +114,34 @@ def run_sonar_detection(input_image, model_choice, conf_threshold, enhance_acous
         model = load_model_hazard()
         if model is None:
             return None, "Multi-hazard weights not found. Please train with train_multiclass_hazard_yolo.py.", "{}"
-        results = model.predict(source=img_bgr, conf=conf_threshold, verbose=False)
+        results = model.predict(source=img_bgr, conf=conf_threshold, iou=0.45, imgsz=640, verbose=False)
         res = results[0]
         boxes = res.boxes.xyxy.cpu().numpy() if len(res.boxes) > 0 else []
         scores = res.boxes.conf.cpu().numpy() if len(res.boxes) > 0 else []
         labels = res.boxes.cls.cpu().numpy() if len(res.boxes) > 0 else []
 
-        for i, (b, s, l) in enumerate(zip(boxes, scores, labels)):
+        img_area = w_orig * h_orig
+        det_idx = 0
+        for b, s, l in zip(boxes, scores, labels):
             cid = int(l)
             cname = model.names.get(cid, f"class_{cid}") if hasattr(model, "names") else f"hazard_{cid}"
             x1, y1, x2, y2 = [int(v) for v in b]
+            bw, bh = x2 - x1, y2 - y1
+            box_area = bw * bh
+
+            # Agent.md Line 65 Size Sanity Filter: reject degenerate full-frame false alarms
+            if (box_area / img_area) > 0.70 or (bw > 0.90 * w_orig and bh > 0.90 * h_orig):
+                continue
+
             color = color_map.get(cname, (0, 255, 255))
             cv2.rectangle(vis_img, (x1, y1), (x2, y2), color, 2)
             cv2.putText(vis_img, f"{cname}: {s*100:.1f}%", (x1, max(20, y1 - 8)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2, cv2.LINE_AA)
-            length_m = round((y2 - y1) * 0.05, 2)
-            width_m = round((x2 - x1) * 0.05, 2)
+            length_m = round(bh * 0.05, 2)
+            width_m = round(bw * 0.05, 2)
+            det_idx += 1
             detections.append({
-                "id": f"HAZARD-{i+1:03d}",
+                "id": f"HAZARD-{det_idx:03d}",
                 "class": cname,
                 "confidence": f"{s*100:.1f}%",
                 "dimensions_m": f"{length_m}m x {width_m}m",
@@ -141,24 +151,34 @@ def run_sonar_detection(input_image, model_choice, conf_threshold, enhance_acous
         model = load_model_b()
         if model is None:
             return None, "Model B weights not found. Please ensure weights/model_b/best.pt exists.", "{}"
-        results = model.predict(source=img_bgr, conf=conf_threshold, verbose=False)
+        results = model.predict(source=img_bgr, conf=conf_threshold, iou=0.45, imgsz=640, verbose=False)
         res = results[0]
         boxes = res.boxes.xyxy.cpu().numpy() if len(res.boxes) > 0 else []
         scores = res.boxes.conf.cpu().numpy() if len(res.boxes) > 0 else []
         labels = res.boxes.cls.cpu().numpy() if len(res.boxes) > 0 else []
 
-        for i, (b, s, l) in enumerate(zip(boxes, scores, labels)):
+        img_area = w_orig * h_orig
+        det_idx = 0
+        for b, s, l in zip(boxes, scores, labels):
             cid = int(l)
             cname = CLASSES_B.get(cid, f"class_{cid}")
             x1, y1, x2, y2 = [int(v) for v in b]
+            bw, bh = x2 - x1, y2 - y1
+            box_area = bw * bh
+
+            # Agent.md Line 65 Size Sanity Filter: reject degenerate full-frame false alarms
+            if (box_area / img_area) > 0.70 or (bw > 0.90 * w_orig and bh > 0.90 * h_orig):
+                continue
+
             color = color_map.get(cname, (0, 255, 255))
             cv2.rectangle(vis_img, (x1, y1), (x2, y2), color, 2)
             cv2.putText(vis_img, f"{cname}: {s*100:.1f}%", (x1, max(20, y1 - 8)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2, cv2.LINE_AA)
-            length_m = round((y2 - y1) * 0.05, 2)
-            width_m = round((x2 - x1) * 0.05, 2)
+            length_m = round(bh * 0.05, 2)
+            width_m = round(bw * 0.05, 2)
+            det_idx += 1
             detections.append({
-                "id": f"HAZARD-{i+1:03d}",
+                "id": f"HAZARD-{det_idx:03d}",
                 "class": cname,
                 "confidence": f"{s*100:.1f}%",
                 "dimensions_m": f"{length_m}m x {width_m}m",
@@ -223,7 +243,7 @@ with gr.Blocks(title="SIH 2026: SSS Hazard Detector") as demo:
                 label="Select Active Detector"
             )
             conf_slider = gr.Slider(minimum=0.10, maximum=0.90, value=0.35, step=0.05, label="Confidence Threshold")
-            enhance_check = gr.Checkbox(label="✨ Acoustic Image Enhancement Mode (CLAHE + Despeckle)", value=False)
+            enhance_check = gr.Checkbox(label="✨ Acoustic Image Enhancement Mode (CLAHE + Despeckle)", value=True)
             img_input = gr.Image(type="numpy", label="Upload Sonar Waterfall Scan")
             btn_run = gr.Button("🔍 Run Sonar Inspection", variant="primary")
 
