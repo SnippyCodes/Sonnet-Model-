@@ -132,7 +132,8 @@ def run_sonar_detection(input_image, model_choice, conf_threshold, enhance_acous
             x1, y1, x2, y2 = d["bbox"]
             bw, bh = x2 - x1, y2 - y1
             box_area = bw * bh
-            if (box_area / img_area) > 0.92 or (bw > 0.96 * w_orig and bh > 0.96 * h_orig):
+            # Discard only degenerate frame-border artifacts (boxes encompassing >99.5% of both dimensions)
+            if bw >= 0.995 * w_orig and bh >= 0.995 * h_orig:
                 continue
             color = color_map.get(cname, (0, 255, 255))
             cv2.rectangle(vis_img, (x1, y1), (x2, y2), color, 2)
@@ -175,7 +176,8 @@ def run_sonar_detection(input_image, model_choice, conf_threshold, enhance_acous
             bw, bh = x2 - x1, y2 - y1
             box_area = bw * bh
 
-            if (box_area / img_area) > 0.92 or (bw > 0.96 * w_orig and bh > 0.96 * h_orig):
+            # Discard only degenerate frame-border artifacts (boxes encompassing >99.5% of both dimensions)
+            if bw >= 0.995 * w_orig and bh >= 0.995 * h_orig:
                 continue
 
             color = color_map.get(cname, (0, 255, 255))
@@ -226,7 +228,8 @@ def run_sonar_detection(input_image, model_choice, conf_threshold, enhance_acous
             bw, bh = x2 - x1, y2 - y1
             box_area = bw * bh
 
-            if (box_area / img_area) > 0.92 or (bw > 0.96 * w_orig and bh > 0.96 * h_orig):
+            # Discard only degenerate frame-border artifacts (boxes encompassing >99.5% of both dimensions)
+            if bw >= 0.995 * w_orig and bh >= 0.995 * h_orig:
                 continue
 
             color = color_map.get(cname, (0, 255, 255))

@@ -184,8 +184,6 @@ class SAHISonarEngine:
                     "conf_val": float(s),
                     "bbox": [gx1, gy1, gx2, gy2]
                 })
-                    "bbox": [gx1, gy1, gx2, gy2]
-                })
 
         # Merge overlapping detections via Global NMS
         merged_detections = apply_global_nms(raw_detections, iou_threshold=iou_threshold)
